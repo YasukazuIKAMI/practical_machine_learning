@@ -1,0 +1,111 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Yasukazu IKAMI"
+date: "Sunday, May 24, 2015"
+output: html_document
+---
+#Summary
+This analysis is the prediction of "how well" subjects do the dumbell lifting exercises. Using the accelerometer data mounted on dumbell, forearm, arm, belt, prediction of the exercise class was executed. Exercise data source are from:http://groupware.les.inf.puc-rio.br/har.
+
+#Loading data
+```{r}
+#training set
+if(!file.exists("pml-training.csv")){
+    trurl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+    download.file(url=trurl,destfile = "pml-training.csv")
+    }
+if(!file.exists("pml-testing.csv")){
+    teurl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    download.file(url=teurl,destfile = "pml-testing.csv")
+}
+training <- read.csv("pml-training.csv",
+                     na.strings=c("NA","#DIV/0!",""))
+testing  <- read.csv("pml-testing.csv",
+                     na.strings=c("NA","#DIV/0!",""))
+```
+#Preprocessing
+##Overview of the training data
+```{r}
+names(training)
+```
+Because columns 1 to 7 are not accelerometer data, they are excluded by the learning material. And to construct learning algorithm all the variables are converted into numerical except for output 'classe' variable.
+```{r}
+endc <- length(training)
+training <- training[,8:endc]
+testing  <- testing[,8:endc]
+
+endc <- length(training)-1
+for(i in 1:endc){
+    training[,i] <- as.numeric(training[,i])
+    testing[,i] <- as.numeric(testing[,i])
+    }
+```
+##Simplifing variables
+Originally, training data set are ordered by the classe variable.
+First, randomizing training dataset by the order of 'raw_timestamp_part_2'. This process is for the K-fold algorithm executed after.
+```{r}
+randomlist <- sort.list(training[,4])
+training <- training[randomlist,]
+```
+Counting NA's of predictors.
+```{r}
+endc <- length(training)
+nas <- NULL
+for (i in 1:endc){
+    nas[i] <- sum(is.na(training[,i]))
+    }
+nas
+```
+There are so many NA's. Column which has many(>19000 out of 19226) NA's should not be included as predictor variable, because quantity of information is very little.
+```{r}
+removecol <- which(nas > 19000)
+training <- training[,-removecol]
+testing  <- testing[,-removecol]
+```
+Remove one of pair variables that has correlation value greater than 0.9.
+```{r}
+library(caret)
+endc <- length(training)
+correl <- cor(training[,-endc])
+removecol <- findCorrelation(correl,cutoff=0.9)
+training <- training[,-removecol]
+testing  <- testing[,-removecol]
+
+```
+
+#Model building
+##SVM algorithm
+First, I use SVM algorithm to build prediction model. Because it is said that SVM algorithm is one of the most accurate algorithms.
+For the cross validation, I choose the K-fold algorithm of K=10.
+```{r,cache = TRUE}
+set.seed(1)
+trC <- trainControl(method="cv",number=10)
+modSVM <- train(classe~.,data=training,method="svmRadial", trControl = trC)
+modSVM
+answerSVM <- predict(modSVM,testing[,-length(training)])
+```
+As a result of learning, optimal parameters are cost parameter C=1, hyper parameter sigma = 0.015. Out of sample error rate is 6.5%.
+
+##Random Forest algorithm
+Next, Randomforest prediction is also tried. Because, randomForest algorithm is also said that it is one of the most powerful learning algorithms.
+In this section, I did not used train function, because it was unusually time consuming. To effectively build the model, tuning of number of samples included into one forest is determined using tuneRF function. Then, randomForest function was run setting the $m_{try}$ variables obtained by tuneRF function. 
+```{r}
+set.seed(1)
+library(randomForest)
+endc <- length(training)
+tune <- tuneRF(training[,-endc],training[,endc],doBest=T)
+```
+```{r, cache=TRUE}
+modrf <- randomForest(classe ~ ., data=training,mtry=tune$mtry)
+modrf
+answerrf <- predict(modrf,testing[,-length(training)])
+```
+Out of bagging error is below 0.5%. Very good prediction model has been obtained.
+
+#Evaluation of prediction result
+Comparing the prediction result of the test set. Exact exerceise classes of the test set are not known here, simply comparing the prediction result of two model, by counting how many of prediction results are agreed in two models.
+```{r}
+agree <- sum(answerSVM == answerrf)
+agree
+```
+Prediction results of SMV and randomForest algorithm are same in all 20 cases. Both model show good prediction performance. In this write-up, randomForest algorithm needs lesser CPU time, so using random forest algorithm is recommended.
